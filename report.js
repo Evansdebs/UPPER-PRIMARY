@@ -366,7 +366,7 @@ function deleteStudent(id) {
     if (confirm('Are you sure you want to delete this student? This will also delete all their scores, parent contacts, and report details.')) {
         students = students.filter(student => student.id !== id);
         
-        // Remove student scores
+        // Remove student scores from all subjects
         Object.keys(scores).forEach(subject => {
             if (scores[subject][id]) {
                 delete scores[subject][id];
@@ -659,6 +659,7 @@ function openScoreEntry(subject) {
         <div>Student Name</div>
         <div>Class Score (50%)</div>
         <div>Exam Score (50%)</div>
+        <div>Total Score</div>
         <div>Grade</div>
     `;
     scoreEntry.appendChild(headerRow);
@@ -667,6 +668,7 @@ function openScoreEntry(subject) {
         const scoreRow = document.createElement('div');
         scoreRow.className = 'score-row';
         
+        // Get existing scores if available
         const studentScores = scores[subject] && scores[subject][student.id] ? scores[subject][student.id] : { classScore: '', examScore: '' };
         const classScore = studentScores.classScore || '';
         const examScore = studentScores.examScore || '';
@@ -674,8 +676,9 @@ function openScoreEntry(subject) {
         let totalScore = '';
         let grade = '';
         
-        if (classScore && examScore) {
-            totalScore = calculateTotalScore(parseInt(classScore), parseInt(examScore));
+        // Calculate total and grade if both scores are available
+        if (classScore !== '' && examScore !== '') {
+            totalScore = calculateTotalScore(parseFloat(classScore), parseFloat(examScore));
             const gradeInfo = getGrade(totalScore);
             grade = gradeInfo.grade;
         }
@@ -694,6 +697,7 @@ function openScoreEntry(subject) {
                        data-student-id="${student.id}" 
                        placeholder="0-100" step="0.1">
             </div>
+            <div class="total-score-display">${totalScore !== '' ? totalScore : ''}</div>
             <div class="grade-display">${grade}</div>
         `;
         scoreEntry.appendChild(scoreRow);
@@ -702,31 +706,36 @@ function openScoreEntry(subject) {
         const classScoreInput = scoreRow.querySelector('.class-score');
         const examScoreInput = scoreRow.querySelector('.exam-score');
         
-        const updateGrade = () => {
+        const updateCalculations = () => {
             const classScoreVal = classScoreInput.value;
             const examScoreVal = examScoreInput.value;
             
-            if (classScoreVal && examScoreVal) {
-                const total = calculateTotalScore(parseFloat(classScoreVal), parseFloat(examScoreVal));
+            let total = '';
+            let gradeText = '';
+            
+            if (classScoreVal !== '' && examScoreVal !== '') {
+                total = calculateTotalScore(parseFloat(classScoreVal), parseFloat(examScoreVal));
                 const gradeInfo = getGrade(total);
+                gradeText = gradeInfo.grade;
                 
-                scoreRow.querySelector('.grade-display').textContent = gradeInfo.grade;
                 scoreRow.querySelector('.grade-display').className = `grade-display grade-${gradeInfo.grade}`;
             } else {
-                scoreRow.querySelector('.grade-display').textContent = '';
                 scoreRow.querySelector('.grade-display').className = 'grade-display';
             }
+            
+            scoreRow.querySelector('.total-score-display').textContent = total !== '' ? total : '';
+            scoreRow.querySelector('.grade-display').textContent = gradeText;
         };
         
-        classScoreInput.addEventListener('input', updateGrade);
-        examScoreInput.addEventListener('input', updateGrade);
+        classScoreInput.addEventListener('input', updateCalculations);
+        examScoreInput.addEventListener('input', updateCalculations);
     });
 
     scoreEntryCard.style.display = 'block';
     scoreEntryCard.scrollIntoView({ behavior: 'smooth' });
 }
 
-// Save scores for a subject
+// Save scores for a subject - FIXED VERSION
 function saveScores() {
     const subject = currentSubject.textContent;
     const classScoreInputs = document.querySelectorAll('.class-score');
@@ -736,42 +745,85 @@ function saveScores() {
         scores[subject] = {};
     }
     
-    let allValid = true;
+    let hasValidScores = false;
+    let hasInvalidScore = false;
     
     classScoreInputs.forEach((classInput, index) => {
         const studentId = parseInt(classInput.getAttribute('data-student-id'));
-        const classScore = parseFloat(classInput.value);
-        const examScore = parseFloat(examScoreInputs[index].value);
+        const examInput = examScoreInputs[index];
         
-        if (classInput.value && (classScore < 0 || classScore > 100)) {
-            allValid = false;
-            classInput.style.borderColor = 'var(--danger)';
+        const classScore = classInput.value.trim();
+        const examScore = examInput.value.trim();
+        
+        // Check if at least one score is provided
+        if (classScore === '' && examScore === '') {
+            // No scores for this student, skip
+            return;
+        }
+        
+        // Validate class score if provided
+        if (classScore !== '') {
+            const classScoreNum = parseFloat(classScore);
+            if (isNaN(classScoreNum) || classScoreNum < 0 || classScoreNum > 100) {
+                hasInvalidScore = true;
+                classInput.style.borderColor = 'var(--danger)';
+            } else {
+                classInput.style.borderColor = '';
+            }
         } else {
             classInput.style.borderColor = '';
         }
         
-        if (examScoreInputs[index].value && (examScore < 0 || examScore > 100)) {
-            allValid = false;
-            examScoreInputs[index].style.borderColor = 'var(--danger)';
+        // Validate exam score if provided
+        if (examScore !== '') {
+            const examScoreNum = parseFloat(examScore);
+            if (isNaN(examScoreNum) || examScoreNum < 0 || examScoreNum > 100) {
+                hasInvalidScore = true;
+                examInput.style.borderColor = 'var(--danger)';
+            } else {
+                examInput.style.borderColor = '';
+            }
         } else {
-            examScoreInputs[index].style.borderColor = '';
+            examInput.style.borderColor = '';
         }
         
-        if (classInput.value && examScoreInputs[index].value) {
-            scores[subject][studentId] = {
-                classScore: classScore,
-                examScore: examScore,
-                totalScore: calculateTotalScore(classScore, examScore)
-            };
-        } else if (classInput.value || examScoreInputs[index].value) {
-            delete scores[subject][studentId];
-        } else {
-            delete scores[subject][studentId];
+        // If no validation errors, save the scores
+        if (!hasInvalidScore) {
+            hasValidScores = true;
+            
+            // Initialize student scores if not exists
+            if (!scores[subject][studentId]) {
+                scores[subject][studentId] = { classScore: '', examScore: '', totalScore: '' };
+            }
+            
+            // Update only the scores that are provided (don't overwrite existing ones with empty values)
+            if (classScore !== '') {
+                scores[subject][studentId].classScore = parseFloat(classScore);
+            }
+            
+            if (examScore !== '') {
+                scores[subject][studentId].examScore = parseFloat(examScore);
+            }
+            
+            // Calculate total if both scores are available
+            if (scores[subject][studentId].classScore !== '' && scores[subject][studentId].examScore !== '') {
+                scores[subject][studentId].totalScore = calculateTotalScore(
+                    scores[subject][studentId].classScore, 
+                    scores[subject][studentId].examScore
+                );
+            } else {
+                scores[subject][studentId].totalScore = '';
+            }
         }
     });
     
-    if (!allValid) {
-        showNotification('Please enter valid scores between 0 and 100', 'error');
+    if (hasInvalidScore) {
+        showNotification('Please enter valid scores between 0 and 100 for all students', 'error');
+        return;
+    }
+    
+    if (!hasValidScores) {
+        showNotification('No scores to save. Please enter scores for at least one student.', 'warning');
         return;
     }
     
@@ -793,20 +845,24 @@ function calculateStudentPerformance(studentId) {
     subjects.forEach(subject => {
         if (scores[subject] && scores[subject][studentId]) {
             const subjectData = scores[subject][studentId];
-            const totalScore = calculateTotalScore(subjectData.classScore, subjectData.examScore);
-            const gradeInfo = getGrade(totalScore);
             
-            studentScores.push({
-                subject: subject,
-                totalScore: totalScore,
-                grade: gradeInfo.grade,
-                remark: gradeInfo.remark
-            });
+            // Only include subjects where both scores are available
+            if (subjectData.classScore !== '' && subjectData.examScore !== '') {
+                const totalScore = calculateTotalScore(subjectData.classScore, subjectData.examScore);
+                const gradeInfo = getGrade(totalScore);
+                
+                studentScores.push({
+                    subject: subject,
+                    totalScore: totalScore,
+                    grade: gradeInfo.grade,
+                    remark: gradeInfo.remark
+                });
+            }
         }
     });
     
     if (studentScores.length === 0) {
-        return null; // No scores available
+        return null; // No complete scores available
     }
     
     // Calculate average score
@@ -863,15 +919,23 @@ function generateAllClassReports() {
         reportCard.id = `report-card-${student.id}`;
         
         const performance = calculateStudentPerformance(student.id);
-        const hasScores = performance !== null;
+        const hasCompleteScores = performance !== null;
         const hasReportDetails = studentReportDetails[student.id] !== undefined;
+        
+        // Check if student has any scores at all
+        let hasAnyScores = false;
+        subjects.forEach(subject => {
+            if (scores[subject] && scores[subject][student.id]) {
+                hasAnyScores = true;
+            }
+        });
         
         reportCard.innerHTML = `
             <div class="student-report-header">
                 <div class="student-report-name">${student.name}</div>
-                <div class="student-report-status ${hasScores ? 'status-ready' : 'status-pending'}">
-                    <i class="fas ${hasScores ? 'fa-check-circle' : 'fa-clock'}"></i>
-                    ${hasScores ? 'Ready' : 'No Scores'}
+                <div class="student-report-status ${hasCompleteScores ? 'status-ready' : hasAnyScores ? 'status-pending' : 'status-pending'}">
+                    <i class="fas ${hasCompleteScores ? 'fa-check-circle' : hasAnyScores ? 'fa-clock' : 'fa-clock'}"></i>
+                    ${hasCompleteScores ? 'Ready' : hasAnyScores ? 'Partial Scores' : 'No Scores'}
                 </div>
             </div>
             <div class="student-report-class">${student.class}</div>
@@ -884,7 +948,7 @@ function generateAllClassReports() {
                     <i class="fas fa-eye"></i> Preview
                 </button>
                 <button class="btn download-btn" onclick="downloadStudentReport(${student.id})" 
-                        ${!hasScores ? 'disabled' : ''}>
+                        ${!hasCompleteScores ? 'disabled' : ''}>
                     <i class="fas fa-download"></i> Download
                 </button>
             </div>
@@ -1048,37 +1112,62 @@ function generateIndividualReport(studentId) {
     `;
 
     let hasScores = false;
+    let completedSubjects = 0;
+    
     subjects.forEach(subject => {
         if (scores[subject] && scores[subject][studentId]) {
-            hasScores = true;
             const subjectData = scores[subject][studentId];
-            const classScore50 = calculateFiftyPercent(subjectData.classScore);
-            const examScore50 = calculateFiftyPercent(subjectData.examScore);
-            const totalScore = calculateTotalScore(subjectData.classScore, subjectData.examScore);
-            const gradeInfo = getGrade(totalScore);
             
+            // Check if both scores are available
+            if (subjectData.classScore !== '' && subjectData.examScore !== '') {
+                hasScores = true;
+                completedSubjects++;
+                
+                const classScore50 = calculateFiftyPercent(subjectData.classScore);
+                const examScore50 = calculateFiftyPercent(subjectData.examScore);
+                const totalScore = calculateTotalScore(subjectData.classScore, subjectData.examScore);
+                const gradeInfo = getGrade(totalScore);
+                
+                reportHTML += `
+                    <tr>
+                        <td>${subject}</td>
+                        <td>${classScore50}</td>
+                        <td>${examScore50}</td>
+                        <td>${totalScore}</td>
+                        <td class="grade-${gradeInfo.grade}">${gradeInfo.grade}</td>
+                        <td class="grade-${gradeInfo.grade}">${gradeInfo.remark}</td>
+                    </tr>
+                `;
+            } else {
+                // Show incomplete scores
+                const classScoreDisplay = subjectData.classScore !== '' ? calculateFiftyPercent(subjectData.classScore) : '-';
+                const examScoreDisplay = subjectData.examScore !== '' ? calculateFiftyPercent(subjectData.examScore) : '-';
+                
+                reportHTML += `
+                    <tr>
+                        <td>${subject}</td>
+                        <td>${classScoreDisplay}</td>
+                        <td>${examScoreDisplay}</td>
+                        <td>-</td>
+                        <td>-</td>
+                        <td>Incomplete</td>
+                    </tr>
+                `;
+            }
+        } else {
+            // No scores for this subject
             reportHTML += `
                 <tr>
                     <td>${subject}</td>
-                    <td>${classScore50}</td>
-                    <td>${examScore50}</td>
-                    <td>${totalScore}</td>
-                    <td class="grade-${gradeInfo.grade}">${gradeInfo.grade}</td>
-                    <td class="grade-${gradeInfo.grade}">${gradeInfo.remark}</td>
+                    <td>-</td>
+                    <td>-</td>
+                    <td>-</td>
+                    <td>-</td>
+                    <td>No scores</td>
                 </tr>
             `;
         }
     });
-
-    if (!hasScores) {
-        reportHTML += `
-            <tr>
-                <td colspan="6" style="text-align: center; padding: 20px;">
-                    No scores available for this student.
-                </td>
-            </tr>
-        `;
-    }
 
     reportHTML += `
             </tbody>
@@ -1102,8 +1191,29 @@ function generateIndividualReport(studentId) {
                     <div class="performance-label">PERFORMANCE LEVEL</div>
                 </div>
                 <div class="performance-item">
-                    <div class="performance-value">${performance.totalSubjects}/9</div>
+                    <div class="performance-value">${completedSubjects}/9</div>
                     <div class="performance-label">SUBJECTS COMPLETED</div>
+                </div>
+            </div>
+        `;
+    } else if (completedSubjects > 0) {
+        reportHTML += `
+            <div class="performance-summary">
+                <div class="performance-item">
+                    <div class="performance-value">${completedSubjects}</div>
+                    <div class="performance-label">SUBJECTS WITH SCORES</div>
+                </div>
+                <div class="performance-item">
+                    <div class="performance-value">${9 - completedSubjects}</div>
+                    <div class="performance-label">SUBJECTS PENDING</div>
+                </div>
+                <div class="performance-item">
+                    <div class="performance-value">-</div>
+                    <div class="performance-label">AVERAGE SCORE</div>
+                </div>
+                <div class="performance-item">
+                    <div class="performance-value">-</div>
+                    <div class="performance-label">OVERALL GRADE</div>
                 </div>
             </div>
         `;
@@ -1283,48 +1393,253 @@ function bulkDownloadAllReports() {
     showNotification(`${classStudents.length} reports will open in separate windows. Please save each one individually.`, 'info');
 }
 
-// Generate WhatsApp message for a student
-function generateWhatsAppMessage(studentId) {
+// Generate PDF report for WhatsApp - Returns the HTML content of the report
+function generatePDFReportForWhatsApp(studentId) {
     const student = students.find(s => s.id === studentId);
     if (!student) return null;
 
+    // Calculate performance
     const performance = calculateStudentPerformance(studentId);
-    if (!performance) return null;
     
     // Get report details
     const details = studentReportDetails[studentId] || {};
 
-    // Generate simplified report text for WhatsApp
-    let message = `*END OF TERM REPORT - THE LIVING SPRING SCHOOL*\n`;
-    message += `Term ${schoolInfo.term}, ${schoolInfo.academicYear}\n\n`;
-    message += `*Student:* ${student.name}\n`;
-    message += `*Class:* ${student.class}\n\n`;
-    message += `*PERFORMANCE SUMMARY*\n`;
-    message += `Average Score: ${performance.average.toFixed(1)}%\n`;
-    message += `Overall Grade: ${performance.overallGrade}\n`;
-    message += `Performance Level: ${performance.overallRemark}\n\n`;
-    message += `*SUBJECT GRADES*\n`;
+    let reportHTML = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Report for ${student.name}</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 15px; line-height: 1.3; }
+                table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 11px; }
+                th, td { border: 1px solid #000; padding: 6px; text-align: center; }
+                th { background-color: #f0f0f0; font-weight: bold; }
+                .school-header { text-align: center; margin-bottom: 15px; }
+                .school-header-with-logos { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+                .school-logo { width: 80px; height: 80px; border: 2px solid #4361ee; border-radius: 10px; padding: 5px; background: white; }
+                .student-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; font-size: 11px; }
+                .attendance-section { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 12px 0; font-size: 11px; }
+                .conduct-section, .interest-section, .teacher-remarks-section { margin: 8px 0; padding: 8px; background: #f8f9fa; border-radius: 5px; font-size: 11px; }
+                .signature-section { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 15px; font-size: 11px; }
+                .footer-message { text-align: center; margin-top: 15px; padding: 10px; background: linear-gradient(135deg, #4361ee, #3a0ca3); color: white; border-radius: 5px; font-weight: bold; }
+                .performance-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 15px 0; padding: 15px; background: #f8f9fa; border-radius: 5px; font-size: 11px; }
+                .performance-item { text-align: center; padding: 8px; background: white; border-radius: 5px; border: 1px solid #ddd; }
+                .performance-value { font-size: 1.2rem; font-weight: bold; color: #4361ee; }
+                .performance-label { font-size: 0.7rem; color: #666; }
+                .grade-A { background-color: #d4edda; color: #155724; }
+                .grade-P { background-color: #c3e6cb; color: #155724; }
+                .grade-AP { background-color: #fff3cd; color: #856404; }
+                .grade-D { background-color: #ffeaa7; color: #856404; }
+                .grade-B { background-color: #f8d7da; color: #721c24; }
+                @media print {
+                    body { margin: 0; padding: 0; }
+                }
+            </style>
+        </head>
+        <body>
+            <div class="school-header">
+                <div class="school-header-with-logos">
+                    <div class="school-logo">
+                        ${schoolInfo.schoolLogo ? `<img src="${schoolInfo.schoolLogo}" alt="School Logo" style="width: 100%; height: 100%; object-fit: contain;">` : 'School Logo'}
+                    </div>
+                    <div class="school-header-content">
+                        <h1>THE LIVING SPRING SCHOOL</h1>
+                        <p>P.O.BOX 16493 K.I.A ACCRA (0243438604)</p>
+                        <p><strong>Motto:</strong> Drink deep or taste not the spring of knowledge</p>
+                        <h2>END OF TERM ${schoolInfo.term} REPORT SHEET</h2>
+                    </div>
+                    <div class="school-logo">
+                        ${schoolInfo.schoolLogo ? `<img src="${schoolInfo.schoolLogo}" alt="School Logo" style="width: 100%; height: 100%; object-fit: contain;">` : 'School Logo'}
+                    </div>
+                </div>
+            </div>
+
+            <div class="student-info-grid">
+                <div class="info-item">
+                    <span class="info-label">CLASS:</span>
+                    <span class="info-value">${student.class} &nbsp;&nbsp; TERM ${schoolInfo.term}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">NAME OF LEARNER:</span>
+                    <span class="info-value">${student.name}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">ACADEMIC YEAR:</span>
+                    <span class="info-value">${schoolInfo.academicYear}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">DATE OF VACATION:</span>
+                    <span class="info-value">${schoolInfo.closingDate}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">NUMBER ON ROLL:</span>
+                    <span class="info-value">${schoolInfo.numberOnRoll}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">RE-OPENING DATE:</span>
+                    <span class="info-value">${schoolInfo.reopeningDate}</span>
+                </div>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>SUBJECT</th>
+                        <th>CLASS SCORE (50%)</th>
+                        <th>EXAMS SCORE (50%)</th>
+                        <th>TOTAL SCORE</th>
+                        <th>GRADE</th>
+                        <th>REMARKS</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+
+    let completedSubjects = 0;
     
     subjects.forEach(subject => {
         if (scores[subject] && scores[subject][studentId]) {
             const subjectData = scores[subject][studentId];
-            const totalScore = calculateTotalScore(subjectData.classScore, subjectData.examScore);
-            const gradeInfo = getGrade(totalScore);
-            message += `${subject}: ${totalScore}% (${gradeInfo.grade}) - ${gradeInfo.remark}\n`;
+            
+            // Check if both scores are available
+            if (subjectData.classScore !== '' && subjectData.examScore !== '') {
+                completedSubjects++;
+                
+                const classScore50 = calculateFiftyPercent(subjectData.classScore);
+                const examScore50 = calculateFiftyPercent(subjectData.examScore);
+                const totalScore = calculateTotalScore(subjectData.classScore, subjectData.examScore);
+                const gradeInfo = getGrade(totalScore);
+                
+                reportHTML += `
+                    <tr>
+                        <td>${subject}</td>
+                        <td>${classScore50}</td>
+                        <td>${examScore50}</td>
+                        <td>${totalScore}</td>
+                        <td class="grade-${gradeInfo.grade}">${gradeInfo.grade}</td>
+                        <td class="grade-${gradeInfo.grade}">${gradeInfo.remark}</td>
+                    </tr>
+                `;
+            } else {
+                // Show incomplete scores
+                const classScoreDisplay = subjectData.classScore !== '' ? calculateFiftyPercent(subjectData.classScore) : '-';
+                const examScoreDisplay = subjectData.examScore !== '' ? calculateFiftyPercent(subjectData.examScore) : '-';
+                
+                reportHTML += `
+                    <tr>
+                        <td>${subject}</td>
+                        <td>${classScoreDisplay}</td>
+                        <td>${examScoreDisplay}</td>
+                        <td>-</td>
+                        <td>-</td>
+                        <td>Incomplete</td>
+                    </tr>
+                `;
+            }
+        } else {
+            // No scores for this subject
+            reportHTML += `
+                <tr>
+                    <td>${subject}</td>
+                    <td>-</td>
+                    <td>-</td>
+                    <td>-</td>
+                    <td>-</td>
+                    <td>No scores</td>
+                </tr>
+            `;
         }
     });
-    
-    message += `\n*ATTENDANCE:* ${details.attendance || 'Not specified'}\n`;
-    message += `*CONDUCT:* ${details.conduct || 'Not specified'}\n`;
-    message += `*INTEREST:* ${details.interest || 'Not specified'}\n`;
-    message += `*TEACHER'S REMARKS:* ${details.teacherRemarks || 'Not specified'}\n\n`;
-    message += `_Report generated via OneReal Report Generator_\n`;
-    message += `📊 Powered by Living Spring School`;
 
-    return message;
+    reportHTML += `
+                </tbody>
+            </table>
+    `;
+
+    // Add performance summary if available
+    if (performance) {
+        reportHTML += `
+            <div class="performance-summary">
+                <div class="performance-item">
+                    <div class="performance-value">${performance.average.toFixed(1)}%</div>
+                    <div class="performance-label">AVERAGE SCORE</div>
+                </div>
+                <div class="performance-item">
+                    <div class="performance-value">${performance.overallGrade}</div>
+                    <div class="performance-label">OVERALL GRADE</div>
+                </div>
+                <div class="performance-item">
+                    <div class="performance-value">${performance.overallRemark}</div>
+                    <div class="performance-label">PERFORMANCE LEVEL</div>
+                </div>
+                <div class="performance-item">
+                    <div class="performance-value">${completedSubjects}/9</div>
+                    <div class="performance-label">SUBJECTS COMPLETED</div>
+                </div>
+            </div>
+        `;
+    }
+
+    // Use saved details or defaults
+    reportHTML += `
+        <div class="attendance-section">
+            <div class="info-item">
+                <span class="info-label">ATTENDANCE:</span>
+                <span class="info-value">${details.attendance || 'Not specified'}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">PROMOTED TO:</span>
+                <span class="info-value"></span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">REPEATED IN:</span>
+                <span class="info-value"></span>
+            </div>
+        </div>
+
+        <div class="conduct-section">
+            <div class="info-item">
+                <span class="info-label">CONDUCT:</span>
+                <span class="info-value">${details.conduct || 'Not specified'}</span>
+            </div>
+        </div>
+
+        <div class="interest-section">
+            <div class="info-item">
+                <span class="info-label">INTEREST:</span>
+                <span class="info-value">${details.interest || 'Not specified'}</span>
+            </div>
+        </div>
+
+        <div class="teacher-remarks-section">
+            <div class="info-item">
+                <span class="info-label">CLASS TEACHER'S REMARKS:</span>
+                <span class="info-value">${details.teacherRemarks || 'Not specified'}</span>
+            </div>
+        </div>
+
+        <div class="signature-section">
+            <div class="info-item">
+                <span class="info-label">ADMINISTRATOR'S SIGNATURE:</span>
+                <span class="info-value">_________________________</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">CLASS TEACHER'S SIGNATURE:</span>
+                <span class="info-value">_________________________</span>
+            </div>
+        </div>
+
+        <div class="footer-message">
+            Have a wonderful holiday!
+        </div>
+    </body>
+    </html>
+    `;
+    
+    return reportHTML;
 }
 
-// Send individual WhatsApp report
+// Send individual WhatsApp report with PDF format
 function sendIndividualWhatsAppReport(studentId) {
     const student = students.find(s => s.id === studentId);
     if (!student) {
@@ -1338,27 +1653,54 @@ function sendIndividualWhatsAppReport(studentId) {
         return;
     }
 
-    const message = generateWhatsAppMessage(studentId);
-    if (!message) {
+    // Generate the report HTML for PDF
+    const reportHTML = generatePDFReportForWhatsApp(studentId);
+    if (!reportHTML) {
         showNotification('No report data available for this student.', 'error');
         return;
     }
 
-    // Generate WhatsApp URL
-    const encodedMessage = encodeURIComponent(message);
-    const whatsappUrl = `https://wa.me/${parentInfo.phone.replace('+', '')}?text=${encodedMessage}`;
+    // Create a Blob from the HTML content
+    const blob = new Blob([reportHTML], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
     
-    // Mark as sent
-    parentContacts[studentId].sent = true;
-    saveParentContacts();
+    // Create a temporary iframe to print the report
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = url;
+    document.body.appendChild(iframe);
     
-    // Open WhatsApp in new tab
-    window.open(whatsappUrl, '_blank');
-    
-    showNotification(`WhatsApp report prepared for ${student.name}. Review and send in WhatsApp.`, 'success');
-    
-    // Refresh parents list
-    renderParentsList();
+    iframe.onload = function() {
+        // Generate WhatsApp message with report details
+        let message = `*END OF TERM REPORT - THE LIVING SPRING SCHOOL*\n`;
+        message += `Term ${schoolInfo.term}, ${schoolInfo.academicYear}\n\n`;
+        message += `*Student:* ${student.name}\n`;
+        message += `*Class:* ${student.class}\n\n`;
+        message += `Please review your child's report card above. 📊\n\n`;
+        message += `_Report generated via OneReal Report Generator_\n`;
+        message += `📚 Powered by Living Spring School`;
+        
+        const encodedMessage = encodeURIComponent(message);
+        const whatsappUrl = `https://wa.me/${parentInfo.phone.replace('+', '')}?text=${encodedMessage}`;
+        
+        // Mark as sent
+        parentContacts[studentId].sent = true;
+        saveParentContacts();
+        
+        // Open WhatsApp in new tab
+        window.open(whatsappUrl, '_blank');
+        
+        // Clean up
+        setTimeout(() => {
+            document.body.removeChild(iframe);
+            URL.revokeObjectURL(url);
+        }, 1000);
+        
+        showNotification(`WhatsApp report prepared for ${student.name}. The report will open in a new window for you to print/save as PDF and then share via WhatsApp.`, 'success');
+        
+        // Refresh parents list
+        renderParentsList();
+    };
 }
 
 // Send WhatsApp report for selected student
@@ -1397,17 +1739,14 @@ function bulkSendWhatsAppReports() {
         setTimeout(() => {
             const parentInfo = parentContacts[student.id];
             if (parentInfo) {
-                const message = generateWhatsAppMessage(student.id);
-                if (message) {
-                    const encodedMessage = encodeURIComponent(message);
-                    const whatsappUrl = `https://wa.me/${parentInfo.phone.replace('+', '')}?text=${encodedMessage}`;
-                    
+                const performance = calculateStudentPerformance(student.id);
+                if (performance) {
                     // Mark as sent
                     parentContacts[student.id].sent = true;
                     
-                    // Open first 5 reports immediately, queue the rest
-                    if (sentCount < 5) {
-                        window.open(whatsappUrl, '_blank');
+                    // Open first 3 reports immediately, queue the rest
+                    if (sentCount < 3) {
+                        sendIndividualWhatsAppReport(student.id);
                     }
                     
                     sentCount++;
@@ -1438,14 +1777,14 @@ function bulkSendWhatsAppReports() {
                         <div>✓ Reports prepared: ${sentCount}</div>
                         <div>⚠ No parent info: ${noParentCount}</div>
                         <div style="margin-top: 10px; font-size: 0.9rem;">
-                            <em>First 5 reports opened automatically. Check WhatsApp Web/Desktop.</em>
+                            <em>First 3 reports opened automatically. Check WhatsApp Web/Desktop.</em>
                         </div>
                     </div>
                 `;
                 
                 showNotification(`Bulk send completed: ${sentCount} reports prepared!`, 'success');
             }
-        }, index * 1000); // Stagger requests to avoid rate limiting
+        }, index * 3000); // Stagger requests to avoid overwhelming the browser
     });
 }
 
@@ -1555,7 +1894,7 @@ function generatePerformanceAnalysis() {
     });
 
     if (totalStudentsWithScores === 0) {
-        showNotification('No scores available for this class.', 'error');
+        showNotification('No complete scores available for this class.', 'error');
         return;
     }
 

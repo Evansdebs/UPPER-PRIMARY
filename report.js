@@ -1223,8 +1223,8 @@ function generateIndividualReport(studentId) {
     reportHTML += `
         <div class="attendance-section">
             <div class="info-item">
-                <span class="info-label">ATTENDANCE:</span>
-                <span class="info-value">${details.attendance || 'Not specified'}</span>
+                <span class="info-label">:</span>
+                <span class="info-value">${details.attendance || ''}</span>
             </div>
             <div class="info-item">
                 <span class="info-label">PROMOTED TO:</span>
@@ -2124,3 +2124,4 @@ function importData(event) {
 
 // Initialize the app when the page loads
 document.addEventListener('DOMContentLoaded', init);
+
